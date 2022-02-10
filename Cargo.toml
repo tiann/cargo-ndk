@@ -1,10 +1,10 @@
 [package]
-name = "cargo-ndk"
+name = "cargo-xdk"
 version = "2.5.0"
 authors = ["Brendan Molloy <brendan@bbqsrc.net>"]
-repository = "https://github.com/bbqsrc/cargo-ndk"
-documentation = "https://docs.rs/cargo-ndk"
-homepage = "https://github.com/bbqsrc/cargo-ndk"
+repository = "https://github.com/tiann/cargo-xdk"
+documentation = "https://docs.rs/cargo-xdk"
+homepage = "https://github.com/tiann/cargo-xdk"
 license = "Apache-2.0 OR MIT"
 description = "Makes building Rust libraries for Android simpler"
 keywords = ["ndk", "cargo", "android", "build"]

@@ -1,4 +1,4 @@
-# cargo-ndk - Build Rust code for Android
+# cargo-xdk - Build Rust code for Android
 
 This cargo extension handles all the environment configuration needed for successfully building libraries
 for Android from a Rust codebase, with support for generating the correct `jniLibs` directory structure.
@@ -6,7 +6,7 @@ for Android from a Rust codebase, with support for generating the correct `jniLi
 ## Installing
 
 ```
-cargo install cargo-ndk
+cargo install cargo-xdk
 ```
 
 You'll also need to install all the toolchains you intend to use. Simplest way is with the following:
@@ -56,7 +56,3 @@ This project is licensed under either of
  * MIT license ([LICENSE-MIT](LICENSE-MIT) or http://opensource.org/licenses/MIT)
 
 at your option.
-
----
-
-[Uyghurs are under attack in Xinjiang.](https://foreignpolicy.com/2019/12/30/xinjiang-crackdown-uighur-2019-what-happened/) The Chinese government is placing millions of people into indoctrination camps and engaging in forced labour.

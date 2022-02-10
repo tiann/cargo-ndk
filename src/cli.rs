@@ -114,7 +114,7 @@ fn is_elf_file(path: &PathBuf) -> bool {
 }
 
 fn print_usage() {
-    println!("cargo-ndk -- Brendan Molloy <https://github.com/bbqsrc/cargo-ndk>\n\nUsage: cargo ndk [OPTIONS] <CARGO_ARGS>\n");
+    println!("cargo-xdk -- tiann <https://github.com/tiann/cargo-xdk>\n\nUsage: cargo xdk [OPTIONS] <CARGO_ARGS>\n");
     println!("{}", Args::usage());
 }
 
