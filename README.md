@@ -44,6 +44,10 @@ expected by Android, and then the ordinary flags to be passed to `cargo`.
 - macOS (x86_64 and arm64)
 - Windows
 
+### Why not using cargo-ndk?
+
+This project is just a fork of [cargo-ndk](https://github.com/bbqsrc/cargo-ndk); But the author refused to add features, such as [#43](https://github.com/bbqsrc/cargo-ndk/pull/43), so I republish it.
+
 ## Similar projects
 
 * [cargo-lipo](https://github.com/TimNN/cargo-lipo) - for building iOS universal Rust libraries
@@ -54,5 +58,3 @@ This project is licensed under either of
 
  * Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE) or http://www.apache.org/licenses/LICENSE-2.0)
  * MIT license ([LICENSE-MIT](LICENSE-MIT) or http://opensource.org/licenses/MIT)
-
-at your option.
