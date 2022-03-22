@@ -1,3 +1,15 @@
+## v2.7.0 - 2022-03-22
+
+- Fix: now works with NDK 23 and maybe up. Maybe. Google do be that company, yo.
+
+## v2.6.0 - 2022-03-10
+
+- Enhancement: added `--bindgen` flag for adding relevant environment variables for bindgen. (thanks @mkpowers and @x3ro)
+
+## v2.5.0 - 2021-11-09
+
+- Fix: `-v` shows version now.
+
 ## v2.4.1 - 2021-07-19
 
 - Fix: Expose `CARGO_NDK_ANDROID_PLATFORM` to subprocesses. (thanks @DoumanAsh)

@@ -1,8 +1,8 @@
 use std::{
     env,
     fs::File,
-    io::Read,
-    path::{Path, PathBuf},
+    path::{Path, PathBuf}, 
+    io::{self, ErrorKind, Read},
 };
 
 use cargo_metadata::MetadataCommand;
@@ -36,11 +36,7 @@ struct Args {
     #[options(help = "platform (also known as API level)")]
     platform: Option<u8>,
 
-    #[options(
-        no_short,
-        help = "disable stripping debug symbols",
-        default = "false"
-    )]
+    #[options(no_short, help = "disable stripping debug symbols", default = "false")]
     no_strip: bool,
 
     #[options(
@@ -49,6 +45,13 @@ struct Args {
         help = "path to Cargo.toml\n                           (limitations: https://github.com/rust-lang/cargo/issues/7856)"
     )]
     manifest_path: Option<PathBuf>,
+
+    #[options(
+        no_short,
+        help = "set bindgen-specific environment variables (BINDGEN_EXTRA_CLANG_ARGS_*) when building",
+        default = "false"
+    )]
+    bindgen: bool,
 }
 
 fn highest_version_ndk_in_path(ndk_dir: &Path) -> Option<PathBuf> {
@@ -118,6 +121,31 @@ fn print_usage() {
     println!("{}", Args::usage());
 }
 
+fn derive_ndk_version(path: &Path) -> Result<Version, io::Error> {
+    let data = std::fs::read_to_string(path.join("source.properties"))?;
+    for line in data.split("\n") {
+        if line.starts_with("Pkg.Revision") {
+            let mut chunks = line.split(" = ");
+            let _ = chunks
+                .next()
+                .ok_or_else(|| io::Error::new(ErrorKind::Other, "No chunk"))?;
+            let version = chunks
+                .next()
+                .ok_or_else(|| io::Error::new(ErrorKind::Other, "No chunk"))?;
+            let version = Version::parse(&version).map_err(|_e| {
+                log::error!("Could not parse NDK version. Got: '{}'", version);
+                io::Error::new(ErrorKind::Other, "Bad version")
+            })?;
+            return Ok(version);
+        }
+    }
+
+    Err(io::Error::new(
+        ErrorKind::Other,
+        "Could not find Pkg.Revision in given path",
+    ))
+}
+
 pub(crate) fn run(args: Vec<String>) {
     log::trace!("Args: {:?}", args);
 
@@ -176,6 +204,7 @@ pub(crate) fn run(args: Vec<String>) {
             return;
         }
     };
+    let ndk_version = derive_ndk_version(&ndk_home).expect("could not resolve NDK version");
     let working_dir = std::env::current_dir().expect("current directory could not be resolved");
     let working_dir_cargo = working_dir.join("Cargo.toml");
     let cargo_manifest = args.manifest_path.as_ref().unwrap_or(&working_dir_cargo);
@@ -235,10 +264,12 @@ pub(crate) fn run(args: Vec<String>) {
         let status = crate::cargo::run(
             &working_dir,
             &ndk_home,
+            ndk_version.clone(),
             triple,
             platform,
             &args.cargo_args,
             cargo_manifest,
+            args.bindgen,
         );
         let code = status.code().unwrap_or(-1);
 
@@ -288,7 +319,7 @@ pub(crate) fn run(args: Vec<String>) {
                 std::fs::copy(so_file, &dest).unwrap();
 
                 if !args.no_strip {
-                    let _ = crate::cargo::strip(&ndk_home, target.triple(), &dest);
+                    let _ = crate::cargo::strip(&ndk_home, target.triple(), &dest, ndk_version.clone());
                 }
             }
         }
