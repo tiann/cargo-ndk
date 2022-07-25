@@ -1,3 +1,20 @@
+## v2.10.1 - 2022-07-24
+
+- Enhancement: update dependencies
+
+## v2.10.0 - 2022-07-24
+
+- Fix: support NDK 23 and higher with libgcc workaround (thanks @rib)
+
+## v2.9.0 - 2022-05-24
+
+- Fix: better bindgen handling (thanks @lattice0)
+
+## v2.8.0 - 2022-05-07
+
+- Fix: missing NDK now exits with exit code 1 (thanks @complexspaces)
+- Enhancement: more intelligent handling of manifest context (thanks @complexspaces)
+
 ## v2.7.0 - 2022-03-22
 
 - Fix: now works with NDK 23 and maybe up. Maybe. Google do be that company, yo.

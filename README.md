@@ -52,6 +52,14 @@ This project is just a fork of [cargo-ndk](https://github.com/bbqsrc/cargo-ndk);
 
 * [cargo-lipo](https://github.com/TimNN/cargo-lipo) - for building iOS universal Rust libraries
 
+## Doing local modifications
+
+git clone and then install the local modifications you did:
+
+```bash
+cargo install --path .
+```
+
 ## License
 
 This project is licensed under either of

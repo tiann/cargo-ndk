@@ -1,5 +1,6 @@
 use std::{
     env,
+    ffi::{OsString},
     fs::File,
     path::{Path, PathBuf}, 
     io::{self, ErrorKind, Read},
@@ -74,18 +75,49 @@ fn highest_version_ndk_in_path(ndk_dir: &Path) -> Option<PathBuf> {
     }
 }
 
-fn derive_ndk_path() -> Option<PathBuf> {
-    if let Some(path) = env::var_os("ANDROID_NDK_HOME").or_else(|| env::var_os("NDK_HOME")) {
-        let path = PathBuf::from(path);
-        return highest_version_ndk_in_path(&path).or(Some(path));
-    };
+/// Return the name and value of the first environment variable that is set
+///
+/// Additionally checks that if any other variables are set then they should
+/// be consistent with the first variable, otherwise a warning is printed.
+fn find_first_consistent_var_set<'a>(vars: &'a [&str]) -> Option<(&'a str, OsString)> {
+    let mut first_var_set = None;
+    for var in vars {
+        if let Some(path) = env::var_os(var) {
+            if let Some((first_var, first_path)) = first_var_set.as_ref() {
+                if *first_path != path {
+                    log::warn!("Environment variable {first_var} = '{first_path:#?}' doesn't match {var} = {path:#?}");
+                }
+                continue;
+            }
+            first_var_set = Some((*var, path));
+        }
+    }
 
-    if let Some(sdk_path) = env::var_os("ANDROID_SDK_HOME") {
+    first_var_set
+}
+
+/// Return a path to a discovered NDK and string describing how it was found
+fn derive_ndk_path() -> Option<(String, PathBuf)> {
+    let ndk_vars = [
+        "ANDROID_NDK_HOME",
+        "ANDROID_NDK_ROOT",
+        "ANDROID_NDK_PATH",
+        "NDK_HOME",
+    ];
+    if let Some((var_name, path)) = find_first_consistent_var_set(&ndk_vars) {
+        let path = PathBuf::from(path);
+        return highest_version_ndk_in_path(&path)
+            .or(Some(path))
+            .map(|path| (var_name.to_string(), path));
+    }
+
+    let sdk_vars = ["ANDROID_HOME", "ANDROID_SDK_ROOT", "ANDROID_SDK_HOME"];
+    if let Some((var_name, sdk_path)) = find_first_consistent_var_set(&sdk_vars) {
         let ndk_path = PathBuf::from(&sdk_path).join("ndk");
         if let Some(v) = highest_version_ndk_in_path(&ndk_path) {
-            return Some(v);
+            return Some((var_name.to_string(), v));
         }
-    };
+    }
 
     // Check Android Studio installed directories
     #[cfg(windows)]
@@ -97,7 +129,7 @@ fn derive_ndk_path() -> Option<PathBuf> {
 
     let ndk_dir = base_dir.join("Android").join("sdk").join("ndk");
     log::trace!("Default NDK dir: {:?}", &ndk_dir);
-    highest_version_ndk_in_path(&ndk_dir)
+    highest_version_ndk_in_path(&ndk_dir).map(|path| ("Standard Location".to_string(), path))
 }
 
 fn is_elf_file(path: &PathBuf) -> bool {
@@ -192,8 +224,8 @@ pub(crate) fn run(args: Vec<String>) {
     // We used to check for NDK_HOME, so we'll keep doing that. But we'll also try ANDROID_NDK_HOME
     // and $ANDROID_SDK_HOME/ndk as this is how Android Studio configures the world
     let ndk_home = match derive_ndk_path() {
-        Some(v) => {
-            log::info!("Using NDK at path: {}", v.display());
+        Some((how, v)) => {
+            log::info!("Using NDK at path: {} ({})", v.display(), how);
             v
         }
         None => {
@@ -201,14 +233,40 @@ pub(crate) fn run(args: Vec<String>) {
             log::error!(
                 "Set the environment ANDROID_NDK_HOME to your NDK installation's root directory,\nor install the NDK using Android Studio."
             );
-            return;
+            std::process::exit(1);
         }
     };
     let ndk_version = derive_ndk_version(&ndk_home).expect("could not resolve NDK version");
     let working_dir = std::env::current_dir().expect("current directory could not be resolved");
-    let working_dir_cargo = working_dir.join("Cargo.toml");
-    let cargo_manifest = args.manifest_path.as_ref().unwrap_or(&working_dir_cargo);
-    let config = match crate::meta::config(cargo_manifest, is_release) {
+
+    // Attempt to smartly determine exactly what package is being worked with. The following is the manifest priority:
+    //
+    // 1. --manifest-path in the command-line arguments
+    // 2. The manifest path of the package specified with `-p` for cargo.
+    // 3. The manifest path in the current working dir
+    let cargo_args = &args.cargo_args;
+    let cargo_manifest = args
+        .manifest_path
+        .or_else(|| {
+            if let Some(selected_package) = cargo_args
+                .iter()
+                .position(|arg| arg == "-p")
+                .and_then(|idx| cargo_args.get(idx + 1))
+            {
+                let selected_package = metadata
+                    .packages
+                    .iter()
+                    .find(|p| &p.name == selected_package)
+                    .unwrap_or_else(|| panic!("unknown package: {}", selected_package));
+
+                Some(selected_package.manifest_path.as_std_path().to_path_buf())
+            } else {
+                None
+            }
+        })
+        .unwrap_or_else(|| working_dir.join("Cargo.toml"));
+
+    let config = match crate::meta::config(&cargo_manifest, is_release) {
         Ok(v) => v,
         Err(e) => {
             log::error!("Failed loading manifest: {}", e);
@@ -263,12 +321,13 @@ pub(crate) fn run(args: Vec<String>) {
 
         let status = crate::cargo::run(
             &working_dir,
+            &metadata.target_directory,
             &ndk_home,
             ndk_version.clone(),
             triple,
             platform,
             &args.cargo_args,
-            cargo_manifest,
+            &cargo_manifest,
             args.bindgen,
         );
         let code = status.code().unwrap_or(-1);
@@ -319,7 +378,8 @@ pub(crate) fn run(args: Vec<String>) {
                 std::fs::copy(so_file, &dest).unwrap();
 
                 if !args.no_strip {
-                    let _ = crate::cargo::strip(&ndk_home, target.triple(), &dest, ndk_version.clone());
+                    let _ =
+                        crate::cargo::strip(&ndk_home, target.triple(), &dest, ndk_version.clone());
                 }
             }
         }
