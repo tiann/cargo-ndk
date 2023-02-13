@@ -1,6 +1,6 @@
 [package]
 name = "cargo-xdk"
-version = "2.10.1"
+version = "2.12.6"
 authors = ["Brendan Molloy <brendan@bbqsrc.net>"]
 repository = "https://github.com/tiann/cargo-xdk"
 documentation = "https://docs.rs/cargo-xdk"
@@ -16,16 +16,16 @@ categories = [
     "development-tools::build-utils"
 ]
 edition = "2018"
+rust-version = "1.56"
 
 [badges]
 maintenance = { status = "actively-developed" }
 
 [dependencies]
-cargo_metadata = "0.14.0"
-env_logger = "0.9.0"
-gumdrop = "0.8.0"
-log = "0.4.14"
+cargo_metadata = "0.15.0"
+env_logger = "0.9.1"
+gumdrop = "0.8.1"
+log = "0.4.17"
 pathos = "0.3.0"
-semver = "1.0.3"
-serde = { version = "1.0.126", features = ["derive"] }
-toml = "0.5.8"
+serde = { version = "1.0.145", features = ["derive"] }
+toml = "0.5.9"

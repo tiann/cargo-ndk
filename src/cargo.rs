@@ -1,9 +1,11 @@
+use std::collections::BTreeMap;
+use std::ffi::{OsStr, OsString};
 use std::io::{Result, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use cargo_metadata::camino::Utf8PathBuf;
-use cargo_metadata::Version;
+use cargo_metadata::semver::Version;
 
 #[cfg(target_os = "macos")]
 const ARCH: &str = "darwin-x86_64";
@@ -74,7 +76,7 @@ fn sysroot_suffix(arch: &str) -> PathBuf {
 }
 
 fn cargo_env_target_cfg(triple: &str, key: &str) -> String {
-    format!("CARGO_TARGET_{}_{}", &triple.replace("-", "_"), key).to_uppercase()
+    format!("CARGO_TARGET_{}_{}", &triple.replace('-', "_"), key).to_uppercase()
 }
 
 fn create_libgcc_linker_script_workaround(target_dir: &Utf8PathBuf) -> Result<Utf8PathBuf> {
@@ -87,6 +89,55 @@ fn create_libgcc_linker_script_workaround(target_dir: &Utf8PathBuf) -> Result<Ut
     Ok(libgcc_workaround_dir)
 }
 
+enum RustFlags {
+    Empty,
+    Encoded(String),
+    Plain(String),
+}
+
+impl RustFlags {
+    fn from_env() -> Self {
+        if let Ok(encoded) = std::env::var("CARGO_ENCODED_RUSTFLAGS") {
+            return Self::Encoded(encoded);
+        }
+
+        if let Ok(plain) = std::env::var("RUSTFLAGS") {
+            return Self::Plain(plain);
+        }
+
+        Self::Empty
+    }
+
+    fn append(&mut self, flag: &str) {
+        match self {
+            RustFlags::Empty => {
+                *self = Self::Plain(flag.into());
+            }
+            RustFlags::Encoded(encoded) => {
+                if !encoded.is_empty() {
+                    encoded.push('\x1f');
+                }
+                encoded.push_str(flag);
+            }
+            RustFlags::Plain(plain) => {
+                if !plain.is_empty() {
+                    plain.push(' ');
+                }
+                plain.push_str(flag);
+            }
+        }
+    }
+
+    fn as_env_var(&self) -> Option<(&str, &str)> {
+        Some(match self {
+            RustFlags::Encoded(x) => ("CARGO_ENCODED_RUSTFLAGS", x),
+            RustFlags::Plain(x) => ("RUSTFLAGS", x),
+            RustFlags::Empty => return None,
+        })
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn run(
     dir: &Path,
     target_dir: &Utf8PathBuf,
@@ -112,8 +163,13 @@ pub(crate) fn run(
     let cc_key = format!("CC_{}", &triple);
     let ar_key = format!("AR_{}", &triple);
     let cxx_key = format!("CXX_{}", &triple);
-    let bindgen_clang_args_key = format!("BINDGEN_EXTRA_CLANG_ARGS_{}", &triple.replace("-", "_"));
+    let bindgen_clang_args_key = format!("BINDGEN_EXTRA_CLANG_ARGS_{}", &triple.replace('-', "_"));
     let cargo_bin = std::env::var("CARGO").unwrap_or_else(|_| "cargo".into());
+
+    log::trace!(
+        "Env: {:#?}",
+        std::env::vars().collect::<BTreeMap<_, _>>()
+    );
 
     log::debug!("cargo: {}", &cargo_bin);
     log::debug!("{}={}", &ar_key, &target_ar.display());
@@ -121,30 +177,33 @@ pub(crate) fn run(
     log::debug!("{}={}", &cxx_key, &target_cxx.display());
     log::debug!(
         "{}={}",
-        cargo_env_target_cfg(&triple, "ar"),
+        cargo_env_target_cfg(triple, "ar"),
         &target_ar.display()
     );
     log::debug!(
         "{}={}",
-        cargo_env_target_cfg(&triple, "linker"),
+        cargo_env_target_cfg(triple, "linker"),
         &target_linker.display()
     );
     log::debug!(
         "{}={}",
         &bindgen_clang_args_key,
-        std::env::var(bindgen_clang_args_key.clone()).unwrap_or("".into())
+        &std::env::var(bindgen_clang_args_key.clone()).unwrap_or_default()
     );
     log::debug!("Args: {:?}", &cargo_args);
 
     // Read initial RUSTFLAGS
-    let mut rustflags = match std::env::var("CARGO_ENCODED_RUSTFLAGS") {
-        Ok(val) => val,
-        Err(std::env::VarError::NotPresent) => "".to_string(),
-        Err(std::env::VarError::NotUnicode(_)) => {
-            log::error!("RUSTFLAGS environment variable contains non-unicode characters");
-            std::process::exit(1);
-        }
-    };
+    let mut rustflags = RustFlags::from_env();
+
+    // Insert Cargo arguments before any `--` arguments.
+    let arg_insertion_position = cargo_args
+        .iter()
+        .enumerate()
+        .find(|e| e.1.trim() == "--")
+        .map(|e| e.0)
+        .unwrap_or(cargo_args.len());
+
+    let mut cargo_args: Vec<OsString> = cargo_args.iter().map(|arg| arg.into()).collect();
 
     let mut cargo_cmd = Command::new(cargo_bin);
     cargo_cmd
@@ -153,8 +212,7 @@ pub(crate) fn run(
         .env(cc_key, &target_linker)
         .env(cxx_key, &target_cxx)
         .env(cargo_env_target_cfg(triple, "ar"), &target_ar)
-        .env(cargo_env_target_cfg(triple, "linker"), &target_linker)
-        .args(cargo_args);
+        .env(cargo_env_target_cfg(triple, "linker"), &target_linker);
 
     // NDK releases >= 23 beta3 no longer include libgcc which rust's pre-built
     // standard libraries depend on. As a workaround for newer NDKs we redirect
@@ -177,13 +235,9 @@ pub(crate) fn run(
                 // Note that we don't use `cargo rustc` to pass custom library search paths to
                 // rustc and instead use `CARGO_ENCODED_RUSTFLAGS` because it affects the building
                 // of all transitive cdylibs (which all need this workaround).
-                if !rustflags.is_empty() {
-                    // Avoid creating an empty '' rustc argument
-                    rustflags.push_str("\x1f");
-                }
-                rustflags.push_str("-L\x1f");
-                rustflags.push_str(libdir.as_str());
-                cargo_cmd.env("CARGO_ENCODED_RUSTFLAGS", rustflags);
+                rustflags.append(&format!("-L{libdir}"));
+                let (k, v) = rustflags.as_env_var().unwrap();
+                cargo_cmd.env(k, v);
             }
             Err(e) => {
                 log::error!("Failed to create libgcc.a linker script workaround");
@@ -200,11 +254,10 @@ pub(crate) fn run(
             &target_sysroot.display(),
             extra_include
         );
-        cargo_cmd.env(bindgen_clang_args_key, bindgen_args.clone());
-        log::debug!("bindgen_args={}", bindgen_args);
-    } else {
-        let bindgen_args = format!("-I{}", extra_include);
-        cargo_cmd.env(bindgen_clang_args_key, bindgen_args.clone());
+        cargo_cmd.env(
+            bindgen_clang_args_key,
+            bindgen_args.replace('\\', "/"),
+        );
         log::debug!("bindgen_args={}", bindgen_args);
     }
 
@@ -212,7 +265,14 @@ pub(crate) fn run(
         Some(parent) => {
             if parent != dir {
                 log::debug!("Working directory does not match manifest-path");
-                cargo_cmd.arg("--manifest-path").arg(&cargo_manifest);
+                cargo_args.insert(
+                    arg_insertion_position,
+                    cargo_manifest.as_os_str().to_owned(),
+                );
+                cargo_args.insert(
+                    arg_insertion_position,
+                    OsStr::new("--manifest-path").to_owned(),
+                );
             }
         }
         _ => {
@@ -220,11 +280,10 @@ pub(crate) fn run(
         }
     }
 
-    cargo_cmd
-        .arg("--target")
-        .arg(&triple)
-        .status()
-        .expect("cargo crashed")
+    cargo_args.insert(arg_insertion_position, OsStr::new(triple).to_owned());
+    cargo_args.insert(arg_insertion_position, OsStr::new("--target").to_owned());
+
+    cargo_cmd.args(cargo_args).status().expect("cargo crashed")
 }
 
 pub(crate) fn strip(
@@ -242,7 +301,7 @@ pub(crate) fn strip(
     log::debug!("strip: {}", &target_strip.display());
 
     Command::new(target_strip)
-        .arg(&bin_path)
+        .arg(bin_path)
         .status()
         .expect("strip crashed")
 }

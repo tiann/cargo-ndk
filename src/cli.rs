@@ -1,14 +1,13 @@
 use std::{
     env,
     ffi::{OsString},
-    fs::File,
-    path::{Path, PathBuf}, 
+    fmt::Display,
     io::{self, ErrorKind, Read},
+    path::{Path, PathBuf},
 };
 
-use cargo_metadata::MetadataCommand;
+use cargo_metadata::{semver::Version, MetadataCommand};
 use gumdrop::Options;
-use semver::Version;
 
 use crate::meta::Target;
 
@@ -57,7 +56,7 @@ struct Args {
 
 fn highest_version_ndk_in_path(ndk_dir: &Path) -> Option<PathBuf> {
     if ndk_dir.exists() {
-        std::fs::read_dir(&ndk_dir)
+        std::fs::read_dir(ndk_dir)
             .ok()?
             .flat_map(Result::ok)
             .filter_map(|x| {
@@ -85,7 +84,13 @@ fn find_first_consistent_var_set<'a>(vars: &'a [&str]) -> Option<(&'a str, OsStr
         if let Some(path) = env::var_os(var) {
             if let Some((first_var, first_path)) = first_var_set.as_ref() {
                 if *first_path != path {
-                    log::warn!("Environment variable {first_var} = '{first_path:#?}' doesn't match {var} = {path:#?}");
+                    log::warn!(
+                        "Environment variable `{} = {:#?}` doesn't match `{} = {:#?}`",
+                        first_var,
+                        first_path,
+                        var,
+                        path
+                    );
                 }
                 continue;
             }
@@ -120,12 +125,7 @@ fn derive_ndk_path() -> Option<(String, PathBuf)> {
     }
 
     // Check Android Studio installed directories
-    #[cfg(windows)]
-    let base_dir = pathos::user::local_dir().unwrap();
-    #[cfg(target_os = "linux")]
-    let base_dir = pathos::user::data_dir().unwrap();
-    #[cfg(target_os = "macos")]
-    let base_dir = pathos::user::home_dir().unwrap().join("Library");
+    let base_dir = find_base_dir();
 
     let ndk_dir = base_dir.join("Android").join("sdk").join("ndk");
     log::trace!("Default NDK dir: {:?}", &ndk_dir);
@@ -136,7 +136,7 @@ fn is_elf_file(path: &PathBuf) -> bool {
     if !path.as_path().is_file() {
         return false;
     }
-    match File::open(path.as_path()) {
+    match std::fs::File::open(path.as_path()) {
         Ok(file) => {
             let mut buffer = [0;4];
             let _ = file.take(4).read(&mut buffer);
@@ -153,9 +153,20 @@ fn print_usage() {
     println!("{}", Args::usage());
 }
 
+fn find_base_dir() -> PathBuf {
+    #[cfg(windows)]
+    let base_dir = pathos::user::local_dir().unwrap().to_path_buf();
+    #[cfg(target_os = "linux")]
+    let base_dir = pathos::user::data_dir().unwrap().to_path_buf();
+    #[cfg(target_os = "macos")]
+    let base_dir = pathos::user::home_dir().unwrap().join("Library");
+
+    base_dir
+}
+
 fn derive_ndk_version(path: &Path) -> Result<Version, io::Error> {
     let data = std::fs::read_to_string(path.join("source.properties"))?;
-    for line in data.split("\n") {
+    for line in data.split('\n') {
         if line.starts_with("Pkg.Revision") {
             let mut chunks = line.split(" = ");
             let _ = chunks
@@ -164,7 +175,7 @@ fn derive_ndk_version(path: &Path) -> Result<Version, io::Error> {
             let version = chunks
                 .next()
                 .ok_or_else(|| io::Error::new(ErrorKind::Other, "No chunk"))?;
-            let version = Version::parse(&version).map_err(|_e| {
+            let version = Version::parse(version).map_err(|_e| {
                 log::error!("Could not parse NDK version. Got: '{}'", version);
                 io::Error::new(ErrorKind::Other, "Bad version")
             })?;
@@ -178,6 +189,23 @@ fn derive_ndk_version(path: &Path) -> Result<Version, io::Error> {
     ))
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum BuildMode {
+    Debug,
+    Release,
+    Profile(String),
+}
+
+impl Display for BuildMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            BuildMode::Debug => "debug",
+            BuildMode::Release => "release",
+            BuildMode::Profile(x) => x,
+        })
+    }
+}
+
 pub(crate) fn run(args: Vec<String>) {
     log::trace!("Args: {:?}", args);
 
@@ -187,8 +215,19 @@ pub(crate) fn run(args: Vec<String>) {
         std::process::exit(0);
     }
 
-    let is_release = args.contains(&"--release".into());
-    log::trace!("is_release: {}", is_release);
+    let build_mode = if args.contains(&"--release".into()) {
+        BuildMode::Release
+    } else if let Some(i) = args.iter().position(|x| x == "--profile") {
+        if let Some(profile) = args.get(i + 1) {
+            BuildMode::Profile(profile.to_string())
+        } else {
+            BuildMode::Debug
+        }
+    } else {
+        BuildMode::Debug
+    };
+
+    log::trace!("build mode: {:?}", build_mode);
 
     let args = match Args::parse_args(&args, gumdrop::ParsingStyle::StopAtFirstFree) {
         Ok(args) if args.help => {
@@ -212,7 +251,7 @@ pub(crate) fn run(args: Vec<String>) {
         std::process::exit(1);
     }
 
-    let metadata = match MetadataCommand::new().exec() {
+    let metadata = match MetadataCommand::new().no_deps().exec() {
         Ok(v) => v,
         Err(e) => {
             log::error!("Failed to load Cargo.toml in current directory.");
@@ -266,7 +305,7 @@ pub(crate) fn run(args: Vec<String>) {
         })
         .unwrap_or_else(|| working_dir.join("Cargo.toml"));
 
-    let config = match crate::meta::config(&cargo_manifest, is_release) {
+    let config = match crate::meta::config(&cargo_manifest, &build_mode) {
         Ok(v) => v,
         Err(e) => {
             log::error!("Failed loading manifest: {}", e);
@@ -350,20 +389,21 @@ pub(crate) fn run(args: Vec<String>) {
             let arch_output_dir = output_dir.join(target.to_string());
             std::fs::create_dir_all(&arch_output_dir).unwrap();
 
-            let dir =
-                out_dir
-                    .join(target.triple())
-                    .join(if is_release { "release" } else { "debug" });
+            let dir = out_dir.join(target.triple()).join(build_mode.to_string());
 
             log::trace!("Target path: {}", dir);
 
-            let so_files = std::fs::read_dir(&dir)
-                .ok()
-                .unwrap()
-                .flat_map(Result::ok)
-                .map(|x| x.path())
-                .filter(|x| is_elf_file(x))
-                .collect::<Vec<_>>();
+            let so_files = match std::fs::read_dir(&dir) {
+                Ok(dir) => dir
+                    .flat_map(Result::ok)
+                    .map(|x| x.path())
+                    .filter(is_elf_file)
+                    .collect::<Vec<_>>(),
+                Err(e) => {
+                    log::error!("{} {:?}", e, dir);
+                    std::process::exit(1);
+                }
+            };
 
             if so_files.is_empty() {
                 log::error!("No .so files found in path {:?}", dir);

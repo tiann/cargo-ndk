@@ -1,6 +1,43 @@
+## v2.12.6 - 2023-02-01
+
+- Fix: stop `cargo_metadata` from downloading the entire world for no reason.
+
+## v2.12.5 - 2023-02-01
+
+- Fix: Handle bindgen clang arguments on Windows.
+
+## v2.12.4 - 2023-01-24
+
+- Fix: Handle `CARGO_ENCODED_RUSTFLAGS` and `RUSTFLAGS` correctly.
+
+## v2.12.3 - 2023-01-22
+
+- Fix: add missing Cargo.lock file.
+
+## v2.12.2 - 2022-10-12
+
+- Fix: Revert `__ANDROID_API__` changes from v2.12.0.
+
+## v2.12.1 - 2022-09-27
+
+- Fix: `build --profile <foo>` is now supported.
+
+## v2.12.0 - 2022-09-27
+
+This release clarifies that the MSRV is `1.56`. This is confirmed by CI.
+
+- Fix: removed use of format strings in order to support older Rust releases
+- Enhancement: define `__ANDROID_API__` in `CFLAGS` and `CXXFLAGS` (thanks @Zoxc)
+- Enhancement: updated dependencies
+
+## v2.11.0 - 2022-08-04
+
+- Fix: remove automatic adding of bindgen flags (use `--bindgen` as expected)
+- Enhancement: consider all widely-used NDK/SDK env vars (thanks @rib)
+
 ## v2.10.1 - 2022-07-24
 
-- Enhancement: update dependencies
+- Enhancement: updated dependencies
 
 ## v2.10.0 - 2022-07-24
 
@@ -61,7 +98,7 @@
 
 - No changes, just guaranteeing stability of the command line interface. :)
 
-## v0.6.2 — 2020-03-05
+## v0.6.2 - 2020-03-05
 
 - Add `CXX` environment variables (thanks @remyers)
 
