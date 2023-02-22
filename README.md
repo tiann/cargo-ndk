@@ -33,7 +33,7 @@ the `ANDROID_NDK_HOME` environment variable.
 ### Example: building a library for 32-bit and 64-bit ARM systems
 
 ```
-cargo ndk -t armeabi-v7a -t arm64-v8a -o ./jniLibs build --release 
+cargo xdk -t armeabi-v7a -t arm64-v8a -o ./jniLibs build --release 
 ```
 
 This specifies the Android targets to be built, the output directory to use for placing the `.so` files in the layout
